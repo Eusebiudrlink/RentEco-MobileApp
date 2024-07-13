@@ -1,0 +1,158 @@
+#include <SoftwareSerial.h>
+#include <Crypto.h>
+#include <SHA256.h>
+//biblioteca timp arduino
+//#include <TimeLib.h>
+#include <Wire.h>
+#include <RTClib.h>
+
+RTC_DS3231 rtc;//are pinii a4-SDA si a5-SCL prestabiliti
+SoftwareSerial mySerial(2, 3); // RX, TX
+
+const int rel1 = 6; // Pinul la care este conectat releu de deschidere
+const int rel2 = 7; // Pinul la care este conectat releul de inchidere
+const char* secretKey = "my_secret_key";
+String receivedSMS;
+String toVerifyText; 
+
+void setup() {
+  pinMode(rel1, OUTPUT);
+  pinMode(rel2, OUTPUT);
+
+  Serial.begin(9600);
+  Serial.println("Starting ...");
+
+  // Setarea vitezei de transmisie pentru modulul SIM800L
+  mySerial.begin(9600);
+  delay(1000);
+  digitalWrite(rel1, HIGH);
+  digitalWrite(rel2, HIGH);
+  delay(10000);
+  // Așteptăm până când modulul este gata
+
+  digitalWrite(rel1, LOW);
+  delay(100);
+  digitalWrite(rel1, HIGH);
+  // Inițializăm modulul SIM800L
+  mySerial.println("AT");
+      
+  mySerial.println("AT+CMGF=1"); // Setăm modul SMS la text
+  delay(200);
+  mySerial.println("AT+CNMI=1,2,0,0,0"); 
+       
+  if (!rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while (1);
+  }
+  if (rtc.lostPower()) {
+    Serial.println("RTC lost power, let's set the time!");
+    //In caz ca rtc a pierdut alimentarea, setez ora la compilare
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
+
+  DateTime nowRtc = rtc.now();
+  // Setează timpul la 26 mai 2024, ora 10:30:00
+ // setTime(22, 44, 0, 26, 5, 2024);
+  Serial.println("Timpul actual:");
+  Serial.println(nowRtc.minute(), DEC);
+}
+
+void loop() {
+  
+  if(Serial.available()){
+    mySerial.println(Serial.read());  
+  }
+
+  if (mySerial.available()) {
+   // Serial.println("Available");
+    receivedSMS= mySerial.readString();
+    receivedSMS.trim();  // Îndepărtează spațiile albe de la început și sfârșit
+    Serial.println("Mesajul primit:");
+    Serial.println(receivedSMS);
+
+    int indexOpen = receivedSMS.indexOf("Open");
+    int indexClose = receivedSMS.indexOf("Close");
+    int index=indexOpen;// byDefault Open
+    bool type=1;//type=1 inseamna Open
+
+// Verificăm dacă cuvântul "Open/Close" a fost găsit
+    if (indexOpen != -1 || indexClose != -1) {
+        if(indexClose!=-1)
+        {
+          index=indexClose;
+          type=0;//setam pe Close
+        }
+        // Extragem subsirul de la începutul mesajului până la cuvântul "Open"
+        toVerifyText = receivedSMS.substring(index);   
+        // Verificăm dacă mesajul primit este este valid
+        if (verifyMessage(toVerifyText.c_str(),type)) {
+          if(indexOpen!=-1)
+          {
+            digitalWrite(rel1, LOW); 
+            delay(1000);
+            digitalWrite(rel1, HIGH); 
+            mySerial.println("Masina s-a deschis");
+          }
+        else{
+            digitalWrite(rel2, LOW); 
+            delay(1000);
+            digitalWrite(rel2, HIGH);
+            mySerial.println("Masina s-a inchis.");
+        }
+      }
+    }
+  }
+}
+  
+bool verifyMessage(const char* message,bool type) {
+
+  char receivedOTP[7];
+  char receivedTimestamp[11];
+  char receivedHash[65];
+  if(type)
+    sscanf(message, "Open:%6s:%10s:%64s", receivedOTP, receivedTimestamp, receivedHash);
+  else
+    sscanf(message, "Close:%6s:%10s:%64s", receivedOTP, receivedTimestamp, receivedHash);
+
+   // Citeste timpul de pe DS3231
+  DateTime now = rtc.now();
+  // Converteste timpul de pe RTC in timestamp UNIX
+  unsigned long currentTimestamp = now.unixtime();
+
+  //Citeste timpul din ceasul arduino
+  //unsigned long currentTimestamp = now();
+  unsigned long messageTimestamp = strtoul(receivedTimestamp, NULL, 10);
+  // Verifică timestamp-ul
+  Serial.println(currentTimestamp);
+  Serial.println(messageTimestamp);
+  long difference = long(currentTimestamp) - long(messageTimestamp);
+  Serial.println(abs(difference) );
+  if (abs(difference)-10793 > 300) { // Mesaj mai vechi de 5 minute (300 secunde)
+    Serial.println("Limita de timp depasita!");
+    return false;
+  }
+  // Concatenează OTP, timestamp și secretKey
+  char dataToHash[100];
+  snprintf(dataToHash, sizeof(dataToHash), "%s%s%s", receivedOTP, receivedTimestamp, secretKey);
+  // Generează hash-ul
+  byte hash[32];
+  SHA256 sha256;
+  sha256.reset();
+  sha256.update((const byte*)dataToHash, strlen(dataToHash));
+  sha256.finalize(hash, sizeof(hash));
+  // Convert hash to hex string
+  char generatedHash[65];
+  for (int i = 0; i < 32; i++) {
+    sprintf(generatedHash + (i * 2), "%02x", hash[i]);
+  }
+  generatedHash[64] = 0;
+  // Compară hash-ul generat cu cel primit
+  if (strcmp(generatedHash, receivedHash) == 0) {
+    Serial.println("Mesajul e valid!");
+    return true;
+  }
+  Serial.println("Mesajul nu e valid!");
+  return false;
+  
+}
+
