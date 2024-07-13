@@ -3,7 +3,7 @@ RentEco is a client-server app built with modern features and a strong focus on 
 
 # Client Side
 Written in Kotlin Compose with Android Studio.
-#Server Side
+# Server Side
 Written in Java Spring with a MySQL database.
 # Main Features of RentEco
 - Login, rent a car, and view history.
