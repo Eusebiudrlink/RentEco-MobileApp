@@ -7,9 +7,10 @@ Written in Kotlin Compose with Android Studio.
 Written in Java Spring with a MySQL database.
 # Main Features of RentEco
 - Login, rent a car, and view history.
-- Register with a driver's license photo, which identifies personal data using Google Cloud Vision API.
-- Open/close car based on SMS messages with an external Arduino module.
+- Register with a driver's license photo, which identifies personal data.
+- Opening/closing the car based on SMS messages with an external Arduino module.
 - Vehicle location tracking.
+- I utilized Google Cloud Platform and Google Cloud Vision API for storage, scalability, and document verification.
 # Security
 - Every request to the server is done with HTTPS.
 - SMS encrypted with OTP (One-Time Password protocol).
